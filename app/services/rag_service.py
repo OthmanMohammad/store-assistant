@@ -1,7 +1,7 @@
+# app/services/rag_service.py
 """
-Enterprise RAG Service with Database Integration - Complete Production Version
-Combines structured data (PostgreSQL) with unstructured content (Vector DB)
-Supports bilingual operation (Arabic/English) with Palestinian business context
+Complete Enterprise RAG Service using Prompt Service
+Includes all missing helper methods
 """
 
 import logging
@@ -15,38 +15,30 @@ from app.config import settings
 from app.database import get_db
 from app.models.product import Product, ProductVariant, ServiceOffering, StoreLocation
 from app.services.vector_service import vector_service
+from app.services.prompt_service import prompt_service
 
 logger = logging.getLogger(__name__)
 
 class EnterpriseRAGService:
     """
-    Advanced RAG service that combines:
-    - Real-time database queries (products, services, store info)
-    - Vector similarity search (documents, policies, procedures)
-    - Intelligent response generation with confidence scoring
-    - Bilingual support (Arabic/English)
-    - Conversation context management
-    - Analytics and performance tracking
+    Complete Enterprise RAG service with prompt service integration
     """
     
     def __init__(self):
         self.vector_service = vector_service
         self.openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.prompt_service = prompt_service
         
-        # Enhanced configuration for production
-        self.similarity_threshold = 0.60  # Balanced for precision/recall
-        self.max_context_length = 5000   # Increased for richer context
-        self.max_products_returned = 15  # More products for better selection
-        self.max_services_returned = 8   # More services coverage
-        self.max_vector_results = 10     # More document chunks
-        
-        # Response quality thresholds
+        # Configuration
+        self.similarity_threshold = 0.60
+        self.max_context_length = 5000
+        self.max_products_returned = 15
+        self.max_services_returned = 8
+        self.max_vector_results = 10
         self.min_confidence_threshold = 0.25
         self.high_confidence_threshold = 0.75
-        
-        # Bilingual support
         self.supported_languages = ["en", "ar", "auto"]
-        
+    
     async def generate_response(
         self,
         user_message: str,
@@ -54,19 +46,7 @@ class EnterpriseRAGService:
         conversation_history: Optional[List[Dict[str, str]]] = None,
         db: Optional[Session] = None
     ) -> Dict[str, Any]:
-        """
-        Generate enterprise-grade response combining database and vector data
-        
-        Args:
-            user_message: Customer's question or request
-            language: Language preference ("en", "ar", "auto")
-            conversation_history: Previous conversation context
-            db: Database session (auto-created if None)
-            
-        Returns:
-            Comprehensive response with answer, sources, confidence, and metadata
-        """
-        # Auto-create database session if not provided
+        """Generate enterprise-grade response using prompt service"""
         db_session = db or next(get_db())
         should_close_db = db is None
         
@@ -86,7 +66,7 @@ class EnterpriseRAGService:
                 user_message, query_analysis
             )
             
-            # Step 4: Combine data sources and generate response
+            # Step 4: Generate response using prompt service
             response = await self._generate_hybrid_response(
                 user_message=user_message,
                 query_analysis=query_analysis,
@@ -94,12 +74,6 @@ class EnterpriseRAGService:
                 unstructured_data=unstructured_data,
                 conversation_history=conversation_history or [],
                 language=language
-            )
-            
-            # Step 5: Log analytics for performance optimization
-            await self._log_query_analytics(
-                user_message, query_analysis, structured_data, 
-                unstructured_data, response, db_session
             )
             
             logger.info(f"✅ Enterprise RAG response generated - Confidence: {response.get('confidence', 0):.2f}")
@@ -114,9 +88,7 @@ class EnterpriseRAGService:
                 db_session.close()
     
     async def _analyze_query(self, query: str, language: str) -> Dict[str, Any]:
-        """
-        Advanced query analysis to extract intent and entities using GPT-4
-        """
+        """Advanced query analysis to extract intent and entities using GPT-4"""
         try:
             analysis_prompt = f"""
             Analyze this customer service query for a Palestinian electronics store and extract structured information:
@@ -154,19 +126,15 @@ class EnterpriseRAGService:
                 temperature=0.1
             )
             
-            # Parse JSON response
             analysis_text = response.choices[0].message.content.strip()
             
-            # Clean up response to ensure valid JSON
             if analysis_text.startswith('```json'):
                 analysis_text = analysis_text.replace('```json', '').replace('```', '').strip()
             
             analysis = json.loads(analysis_text)
             
-            # Add detected language
+            # Add detected language and metadata
             analysis["language"] = self._detect_language(query) if language == "auto" else language
-            
-            # Add query metadata
             analysis["original_query"] = query
             analysis["query_length"] = len(query)
             analysis["has_arabic"] = bool(self._count_arabic_chars(query))
@@ -200,9 +168,7 @@ class EnterpriseRAGService:
         query_analysis: Dict[str, Any], 
         db: Session
     ) -> Dict[str, Any]:
-        """
-        Query PostgreSQL for real-time structured data based on query analysis
-        """
+        """Query PostgreSQL for real-time structured data based on query analysis"""
         structured_data = {
             "products": [],
             "services": [],
@@ -251,9 +217,7 @@ class EnterpriseRAGService:
             return structured_data
     
     async def _query_products(self, entities: Dict, intent: str, db: Session) -> List[Dict]:
-        """
-        Advanced product database query with intelligent filtering and ranking
-        """
+        """Advanced product database query with intelligent filtering and ranking"""
         try:
             # Base query for available products
             query = db.query(Product).filter(Product.is_available == True)
@@ -294,13 +258,10 @@ class EnterpriseRAGService:
             
             # Intent-based ordering
             if intent == "recommendation":
-                # Prioritize featured and promoted products
                 query = query.order_by(Product.is_featured.desc(), Product.is_promotion.desc())
             elif intent == "price_check":
-                # Order by price for comparison
                 query = query.order_by(Product.price_jod.asc())
             else:
-                # Default: featured products first, then by name
                 query = query.order_by(Product.is_featured.desc(), Product.name.asc())
             
             # Execute with limit
@@ -335,9 +296,7 @@ class EnterpriseRAGService:
             return []
     
     async def _query_services(self, entities: Dict, db: Session) -> List[Dict]:
-        """
-        Query services database with intelligent matching
-        """
+        """Query services database with intelligent matching"""
         try:
             query = db.query(ServiceOffering)
             
@@ -376,9 +335,7 @@ class EnterpriseRAGService:
             return []
     
     async def _query_store_info(self, db: Session) -> Dict:
-        """
-        Get comprehensive store information
-        """
+        """Get comprehensive store information"""
         try:
             store = db.query(StoreLocation).first()
             if store:
@@ -403,9 +360,7 @@ class EnterpriseRAGService:
         user_message: str, 
         query_analysis: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """
-        Retrieve relevant context from vector database with advanced filtering
-        """
+        """Retrieve relevant context from vector database with advanced filtering"""
         try:
             # Create enhanced search query
             search_query = self._enhance_search_query(user_message, query_analysis)
@@ -467,9 +422,7 @@ class EnterpriseRAGService:
             }
     
     def _enhance_search_query(self, user_message: str, query_analysis: Dict[str, Any]) -> str:
-        """
-        Enhance search query with extracted entities and context
-        """
+        """Enhance search query with extracted entities and context"""
         query_parts = [user_message]
         entities = query_analysis.get("entities", {})
         
@@ -506,9 +459,7 @@ class EnterpriseRAGService:
         return enhanced_query[:200]  # Limit length
     
     def _build_metadata_filter(self, query_analysis: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Build intelligent metadata filter for vector search
-        """
+        """Build intelligent metadata filter for vector search"""
         filter_dict = {}
         
         # Language filtering
@@ -546,46 +497,25 @@ class EnterpriseRAGService:
         conversation_history: List[Dict[str, str]],
         language: str
     ) -> Dict[str, Any]:
-        """
-        Generate comprehensive response combining all data sources
-        """
+        """Generate comprehensive response combining all data sources"""
         try:
-            # Build comprehensive system prompt
-            system_prompt = self._build_enterprise_system_prompt(language)
+            detected_language = query_analysis.get('language', language)
             
-            # Build rich data context
+            # Use prompt service for system prompt
+            system_prompt = self.prompt_service.get_system_prompt(detected_language)
+            
+            # Build data and conversation context
             data_context = self._build_data_context(structured_data, unstructured_data)
-            
-            # Build conversation context
             history_context = self._build_conversation_context(conversation_history)
             
-            # Create comprehensive user prompt
-            user_prompt = f"""
-Customer Question: {user_message}
-
-{data_context}
-{history_context}
-
-Analysis Context:
-- Intent: {query_analysis.get('intent', 'general')}
-- Language: {query_analysis.get('language', 'en')}
-- Complexity: {query_analysis.get('complexity', 'simple')}
-- Urgency: {query_analysis.get('urgency', 'medium')}
-
-Please provide a comprehensive, accurate response using the available data:
-1. If referencing products: include current pricing (in JOD), availability, and key specifications
-2. If mentioning services: include pricing, duration, and requirements
-3. If citing policies: reference the specific source document
-4. Maintain a professional, helpful tone appropriate for Palestinian customers
-5. Use the customer's preferred language ({query_analysis.get('language', 'en')})
-6. If insufficient information is available, clearly state limitations and suggest alternatives
-
-Response Requirements:
-- Be specific and actionable
-- Include relevant prices in Jordanian Dinars (JOD)
-- Mention warranty information when relevant
-- Provide contact information for follow-up if needed
-"""
+            # Use prompt service for user prompt
+            user_prompt = self.prompt_service.get_user_prompt(
+                user_message=user_message,
+                language=detected_language,
+                data_context=data_context,
+                history_context=history_context,
+                query_analysis=query_analysis
+            )
             
             # Generate response with appropriate model and settings
             response = self.openai_client.chat.completions.create(
@@ -594,13 +524,22 @@ Response Requirements:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                max_tokens=800,  # Increased for detailed responses
+                max_tokens=800,
                 temperature=0.7,
                 presence_penalty=0.1,
                 frequency_penalty=0.1
             )
             
             ai_response = response.choices[0].message.content.strip()
+            
+            # Check language consistency and force Arabic if needed
+            if detected_language == "ar":
+                arabic_chars = self._count_arabic_chars(ai_response)
+                total_chars = len([c for c in ai_response if c.isalpha()])
+                
+                if total_chars > 0 and arabic_chars / total_chars < 0.3:
+                    logger.warning("Response not in Arabic, forcing Arabic response...")
+                    ai_response = await self._force_arabic_response(user_message)
             
             # Calculate comprehensive confidence score
             confidence = self._calculate_hybrid_confidence(
@@ -610,16 +549,16 @@ Response Requirements:
             # Compile comprehensive sources
             all_sources = unstructured_data.get("sources", [])
             if structured_data.get("products"):
-                all_sources.append("Product Database")
+                all_sources.append("قاعدة بيانات المنتجات" if detected_language == "ar" else "Product Database")
             if structured_data.get("services"):
-                all_sources.append("Service Database")
+                all_sources.append("قاعدة بيانات الخدمات" if detected_language == "ar" else "Service Database")
             if structured_data.get("store_info"):
-                all_sources.append("Store Information")
+                all_sources.append("معلومات المتجر" if detected_language == "ar" else "Store Information")
             
             # Build comprehensive response
             response_data = {
                 "answer": ai_response,
-                "language": query_analysis.get("language", language),
+                "language": detected_language,
                 "sources": list(set(all_sources)),
                 "confidence": confidence,
                 "data_sources": {
@@ -645,59 +584,14 @@ Response Requirements:
             
         except Exception as e:
             logger.error(f"Hybrid response generation failed: {str(e)}")
-            return self._fallback_response(user_message, language)
-    
-    def _build_enterprise_system_prompt(self, language: str) -> str:
-        """
-        Build comprehensive system prompt for enterprise RAG
-        """
-        if language == "ar":
-            return """أنت مساعد ذكي متقدم لخدمة العملاء في تك مارت فلسطين، متجر الإلكترونيات الرائد في نابلس.
-
-مهامك الأساسية:
-1. مساعدة العملاء الفلسطينيين بأسئلتهم حول المنتجات والخدمات والسياسات
-2. استخدام البيانات الحية من قاعدة البيانات (أسعار، توفر، مواصفات) مع المعلومات من الوثائق
-3. تقديم إجابات دقيقة ومفصلة ومهنية باللغة العربية
-4. ذكر الأسعار بالدينار الأردني (JOD) والتوفر الحالي
-5. الإشارة إلى مصادر المعلومات والوثائق ذات الصلة
-6. فهم السياق الفلسطيني والاحتياجات المحلية
-
-إرشادات الاستجابة:
-- كن مهذباً ومساعداً ودقيقاً
-- استخدم اللغة العربية الفصحى مع المصطلحات التقنية المناسبة
-- اذكر معلومات الاتصال عند الحاجة
-- قدم بدائل إذا لم تكن المعلومات متوفرة
-- احترم الثقافة والتقاليد الفلسطينية في التواصل"""
-        
-        else:
-            return """You are an advanced AI customer service assistant for TechMart Palestine, the leading electronics store in Nablus, West Bank.
-
-Your core responsibilities:
-1. Help Palestinian customers with questions about products, services, and store policies
-2. Use real-time database information (pricing, availability, specifications) combined with document knowledge
-3. Provide accurate, detailed, and professional responses in English
-4. Include current pricing in Jordanian Dinars (JOD) and availability status
-5. Cite relevant sources and reference policy documents when applicable
-6. Understand Palestinian context and local customer needs
-
-Response guidelines:
-- Maintain a friendly, professional, and helpful tone
-- Include specific product details, pricing, and availability when discussing items
-- Provide contact information for follow-up when appropriate
-- Offer alternatives if requested information isn't available
-- Be culturally sensitive to Palestinian business practices and customer expectations
-- Always aim to be helpful while being honest about limitations
-
-Store context: TechMart Palestine serves the Palestinian market with authentic products, competitive pricing, bilingual support, and comprehensive customer service including delivery, installation, and technical support."""
+            return self._fallback_response(user_message, detected_language)
     
     def _build_data_context(
         self, 
         structured_data: Dict[str, Any], 
         unstructured_data: Dict[str, Any]
     ) -> str:
-        """
-        Build comprehensive data context for AI with rich formatting
-        """
+        """Build comprehensive data context for AI with rich formatting"""
         context_parts = []
         
         # Add current product information with rich details
@@ -759,9 +653,7 @@ Email: {store.get('email', 'info@techmart-palestine.ps')}
         return "\n".join(context_parts)
     
     def _build_conversation_context(self, conversation_history: List[Dict[str, str]]) -> str:
-        """
-        Build conversation context with intelligent summarization
-        """
+        """Build conversation context with intelligent summarization"""
         if not conversation_history:
             return ""
         
@@ -787,9 +679,7 @@ Email: {store.get('email', 'info@techmart-palestine.ps')}
         query_analysis: Dict[str, Any],
         response_text: str = ""
     ) -> float:
-        """
-        Calculate sophisticated confidence score based on multiple factors
-        """
+        """Calculate sophisticated confidence score based on multiple factors"""
         base_confidence = 0.2  # Start with low base
         
         # Data availability boosts
@@ -838,91 +728,46 @@ Email: {store.get('email', 'info@techmart-palestine.ps')}
         
         return round(final_confidence, 3)
     
-    async def _log_query_analytics(
-        self,
-        user_message: str,
-        query_analysis: Dict[str, Any],
-        structured_data: Dict[str, Any],
-        unstructured_data: Dict[str, Any],
-        response: Dict[str, Any],
-        db: Session
-    ):
-        """
-        Log comprehensive analytics for performance optimization and business intelligence
-        """
+    async def _force_arabic_response(self, user_message: str) -> str:
+        """Force Arabic response using prompt service"""
         try:
-            # For now, log to application logs (can be extended to database)
-            analytics_data = {
-                "query": user_message[:100],  # Truncated for privacy
-                "intent": query_analysis.get("intent"),
-                "language": query_analysis.get("language"),
-                "complexity": query_analysis.get("complexity"),
-                "confidence": response.get("confidence"),
-                "products_found": len(structured_data.get("products", [])),
-                "services_found": len(structured_data.get("services", [])),
-                "document_chunks": len(unstructured_data.get("chunks", [])),
-                "vector_quality": unstructured_data.get("average_score", 0),
-                "response_length": len(response.get("answer", "")),
-                "sources_count": len(response.get("sources", []))
-            }
+            # First try pre-written responses from prompt service
+            prewritten_response = self.prompt_service.get_force_arabic_response(user_message)
             
-            logger.info(f"RAG Analytics: {json.dumps(analytics_data)}")
+            # If it's a common query, return pre-written response
+            if any(word in user_message for word in ["ساعات", "العمل", "اتصال", "هاتف"]):
+                return prewritten_response
             
-            # Future: Store in QueryAnalytics table for business intelligence
-            # analytics_record = QueryAnalytics(**analytics_data)
-            # db.add(analytics_record)
-            # db.commit()
+            # Otherwise, use OpenAI with simple Arabic prompt
+            simple_prompt = self.prompt_service.get_simple_arabic_prompt(user_message)
             
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": simple_prompt}],
+                max_tokens=300,
+                temperature=0.1
+            )
+            
+            arabic_response = response.choices[0].message.content.strip()
+            
+            # Verify it's actually Arabic
+            arabic_chars = self._count_arabic_chars(arabic_response)
+            total_chars = len([c for c in arabic_response if c.isalpha()])
+            
+            if total_chars > 0 and arabic_chars / total_chars > 0.3:
+                return arabic_response
+            else:
+                # Fallback to pre-written response
+                return prewritten_response
+                
         except Exception as e:
-            logger.error(f"Analytics logging failed: {str(e)}")
-    
-    def _detect_language(self, text: str) -> str:
-        """
-        Enhanced language detection with better Arabic support
-        """
-        if not text:
-            return "en"
-        
-        arabic_chars = self._count_arabic_chars(text)
-        total_chars = len([c for c in text if c.isalpha()])
-        
-        if total_chars == 0:
-            return "en"
-        
-        arabic_ratio = arabic_chars / total_chars
-        
-        # More sophisticated detection
-        if arabic_ratio > 0.25:  # Lowered threshold for mixed content
-            return "ar"
-        elif arabic_ratio > 0.1 and any(word in text for word in ["ما", "هي", "كيف", "أين", "متى"]):
-            return "ar"  # Common Arabic question words
-        else:
-            return "en"
-    
-    def _count_arabic_chars(self, text: str) -> int:
-        """Count Arabic characters in text"""
-        return len([c for c in text if '\u0600' <= c <= '\u06FF'])
+            logger.error(f"Force Arabic response failed: {str(e)}")
+            return self.prompt_service.get_fallback_response("ar")
     
     def _fallback_response(self, user_message: str, language: str) -> Dict[str, Any]:
-        """
-        Enhanced fallback response with helpful alternatives
-        """
-        if language == "ar":
-            message = """أعتذر، أواجه صعوبة تقنية في معالجة طلبك حالياً. 
-
-يرجى المحاولة مرة أخرى أو الاتصال بفريق الدعم:
-📞 +970-9-234-5678
-📧 info@techmart-palestine.ps
-
-أو زيارة متجرنا في شارع الرفيدية، نابلس."""
-        else:
-            message = """I apologize, but I'm experiencing technical difficulties processing your request right now. 
-
-Please try again in a moment or contact our support team:
-📞 +970-9-234-5678
-📧 info@techmart-palestine.ps
-
-You can also visit our store at Rafidia Street, Nablus."""
+        """Enhanced fallback response using prompt service"""
+        # Use prompt service for fallback message
+        message = self.prompt_service.get_fallback_response(language)
         
         return {
             "answer": message,
@@ -949,10 +794,32 @@ You can also visit our store at Rafidia Street, Nablus."""
             }
         }
     
+    def _detect_language(self, text: str) -> str:
+        """Enhanced Arabic language detection"""
+        if not text.strip():
+            return "en"
+        
+        arabic_chars = self._count_arabic_chars(text)
+        total_chars = len([c for c in text if c.isalpha()])
+        
+        if total_chars == 0:
+            return "en"
+        
+        arabic_ratio = arabic_chars / total_chars
+        
+        if arabic_ratio > 0.15:
+            return "ar"
+        elif arabic_ratio > 0.1 and any(word in text for word in ["ما", "هي", "كيف", "أين", "متى"]):
+            return "ar"
+        else:
+            return "en"
+    
+    def _count_arabic_chars(self, text: str) -> int:
+        """Count Arabic characters in text"""
+        return len([c for c in text if '\u0600' <= c <= '\u06FF'])
+    
     async def get_suggested_questions(self, language: str = "en") -> List[str]:
-        """
-        Get intelligent suggested questions based on language and context
-        """
+        """Get intelligent suggested questions based on language and context"""
         if language == "ar":
             return [
                 "ما هي ساعات عمل المتجر؟",

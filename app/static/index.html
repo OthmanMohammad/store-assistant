@@ -25,6 +25,7 @@ body{font-family:sans-serif;max-width:800px;margin:20px auto;background:#f5f5f5}
 .suggestion-btn:hover{background:#667eea;color:white}
 .typing{opacity:0.7;font-style:italic}
 .lang-indicator{position:absolute;top:20px;right:20px;background:rgba(255,255,255,0.2);padding:4px 8px;border-radius:10px;font-size:12px}
+.debug-info{position:absolute;bottom:20px;right:20px;background:rgba(0,0,0,0.7);color:white;padding:5px 10px;border-radius:5px;font-size:10px;opacity:0.7}
 </style>
 
 <div class="chat-container">
@@ -45,6 +46,8 @@ body{font-family:sans-serif;max-width:800px;margin:20px auto;background:#f5f5f5}
     <input id="i" placeholder="Type your question..." />
     <button id="send">Send</button>
   </div>
+  
+  <div class="debug-info" id="debugInfo">Debug: Ready</div>
 </div>
 
 <script>
@@ -54,9 +57,50 @@ const sendBtn = document.getElementById('send');
 const suggestions = document.getElementById('suggestions');
 const suggestionBtns = document.getElementById('suggestionBtns');
 const langIndicator = document.getElementById('langIndicator');
+const debugInfo = document.getElementById('debugInfo');
 
 let sessionId = localStorage.getItem('sessionId') || null;
 let currentLanguage = 'en';
+
+// FIXED: Enhanced Arabic detection function
+function detectLanguage(text) {
+  if (!text.trim()) return 'en';
+  
+  // Count Arabic characters
+  let arabicChars = 0;
+  let totalChars = 0;
+  
+  for (let char of text) {
+    if (/[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(char)) {
+      arabicChars++;
+    }
+    if (/[a-zA-Z\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(char)) {
+      totalChars++;
+    }
+  }
+  
+  if (totalChars === 0) return 'en';
+  
+  const arabicRatio = arabicChars / totalChars;
+  
+  // Enhanced detection logic
+  if (arabicRatio > 0.15) {
+    console.log(`Arabic detected by ratio: ${(arabicRatio * 100).toFixed(1)}%`);
+    return 'ar';
+  }
+  
+  // Check for common Arabic words
+  const arabicWords = ['ما', 'هي', 'كيف', 'أين', 'متى', 'هل', 'في', 'على', 'سعر', 'ساعات', 'اوقات', 'العمل'];
+  for (let word of arabicWords) {
+    if (text.includes(word)) {
+      console.log(`Arabic detected by keyword: ${word}`);
+      return 'ar';
+    }
+  }
+  
+  console.log(`English detected, Arabic ratio: ${(arabicRatio * 100).toFixed(1)}%`);
+  return 'en';
+}
 
 function addMessage(role, text, metadata = {}) {
   const msgDiv = document.createElement('div');
@@ -151,33 +195,49 @@ async function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
   
+  // FIXED: Detect language before sending
+  const detectedLang = detectLanguage(text);
+  updateLanguage(detectedLang);
+  
+  // Debug info
+  debugInfo.textContent = `Debug: Detected ${detectedLang.toUpperCase()}, sending with locale`;
+  
   addMessage('user', text);
   input.value = '';
   showTyping();
   
   try {
+    const payload = {
+      text: text,
+      session_id: sessionId,
+      locale: detectedLang  // FIXED: Always send detected language
+    };
+    
+    console.log('Sending payload:', payload);
+    
     const response = await fetch('/channels/webchat/message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: text,
-        session_id: sessionId,
-        locale: currentLanguage === 'auto' ? null : currentLanguage
-      })
+      body: JSON.stringify(payload)
     });
     
     const result = await response.json();
     hideTyping();
+    
+    console.log('Received response:', result);
     
     if (result.session_id) {
       sessionId = result.session_id;
       localStorage.setItem('sessionId', sessionId);
     }
     
-    // Update language if detected
+    // Update language indicator
     if (result.language) {
       updateLanguage(result.language);
     }
+    
+    // Update debug info
+    debugInfo.textContent = `Debug: Sent ${detectedLang}, Got ${result.language || 'unknown'}, Conf: ${(result.confidence * 100).toFixed(0)}%`;
     
     // Add bot response
     addMessage('bot', result.text || 'Sorry, I couldn\'t understand that.', {
@@ -190,10 +250,22 @@ async function sendMessage() {
       updateSuggestions(result.suggested_questions);
     }
     
+    // Check if Arabic query got English response (debugging)
+    if (detectedLang === 'ar' && result.language === 'en') {
+      console.warn('Arabic query got English response!');
+      debugInfo.textContent = 'Debug: ⚠️ Arabic query got English response';
+      debugInfo.style.background = 'rgba(255,0,0,0.7)';
+    } else if (detectedLang === 'ar' && result.language === 'ar') {
+      console.log('Arabic query got Arabic response ✅');
+      debugInfo.style.background = 'rgba(0,255,0,0.7)';
+    }
+    
   } catch (error) {
     hideTyping();
     addMessage('bot', 'Sorry, I\'m having technical difficulties. Please try again.');
     console.error('Chat error:', error);
+    debugInfo.textContent = `Debug: Error - ${error.message}`;
+    debugInfo.style.background = 'rgba(255,0,0,0.7)';
   }
 }
 
@@ -201,6 +273,18 @@ async function sendMessage() {
 sendBtn.onclick = sendMessage;
 input.onkeypress = (e) => {
   if (e.key === 'Enter') sendMessage();
+};
+
+// FIXED: Add real-time language detection as user types
+input.oninput = () => {
+  const currentText = input.value;
+  if (currentText.length > 2) {
+    const detectedLang = detectLanguage(currentText);
+    if (detectedLang !== currentLanguage) {
+      updateLanguage(detectedLang);
+      debugInfo.textContent = `Debug: Typing in ${detectedLang.toUpperCase()}`;
+    }
+  }
 };
 
 // Load initial suggestions
@@ -215,6 +299,18 @@ async function loadInitialSuggestions() {
 }
 
 // Initialize
-addMessage('bot', 'Hello! I\'m your AI store assistant. How can I help you today?');
+addMessage('bot', 'Hello! أهلاً وسهلاً! How can I help you today? كيف يمكنني مساعدتك؟');
 loadInitialSuggestions();
+debugInfo.textContent = 'Debug: Ready - Type to test language detection';
+
+// Add some test buttons for quick testing
+setTimeout(() => {
+  const testButtons = document.createElement('div');
+  testButtons.style.cssText = 'position:fixed;top:10px;left:10px;z-index:1000;';
+  testButtons.innerHTML = `
+    <button onclick="input.value='What are store hours?'; sendMessage();" style="margin:2px;padding:5px;font-size:10px;">EN Test</button>
+    <button onclick="input.value='ما هي ساعات العمل؟'; sendMessage();" style="margin:2px;padding:5px;font-size:10px;">AR Test</button>
+  `;
+  document.body.appendChild(testButtons);
+}, 1000);
 </script>

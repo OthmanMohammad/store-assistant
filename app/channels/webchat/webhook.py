@@ -1,3 +1,7 @@
+"""
+Webchat Webhook - Using the Updated RAG Service
+"""
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -30,11 +34,7 @@ class ChatResponse(BaseModel):
 @router.post("/message", response_model=ChatResponse)
 async def message(msg: WebMsg, db: Session = Depends(get_db)):
     """
-    Process chat message using Enterprise RAG (Retrieval-Augmented Generation)
-    
-    - **text**: User's message
-    - **session_id**: Optional session identifier for conversation continuity
-    - **locale**: Optional language preference
+    FIXED: Process chat message using Enterprise RAG Service
     """
     try:
         # Get or create session
@@ -74,7 +74,7 @@ async def message(msg: WebMsg, db: Session = Depends(get_db)):
         
         logger.info(f"💬 Processing message for session {session_id}: {msg.text[:50]}...")
         
-        # Generate Enterprise RAG response
+        # FIXED: Call the updated RAG service directly
         rag_response = await enterprise_rag_service.generate_response(
             user_message=msg.text,
             language=msg.locale or user.preferred_language or "auto",
@@ -123,14 +123,27 @@ async def message(msg: WebMsg, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"❌ Chat processing failed: {str(e)}", exc_info=True)
         
-        # Return error response
+        # FIXED: Better error handling with proper fallback
         fallback_session = msg.session_id or str(uuid.uuid4())
+        fallback_language = msg.locale or "en"
+        
+        # Use prompt service for fallback
+        try:
+            from app.services.prompt_service import prompt_service
+            fallback_message = prompt_service.get_fallback_response(fallback_language)
+        except:
+            # Ultimate fallback
+            if fallback_language == "ar":
+                fallback_message = "عذراً، أواجه مشكلة تقنية. يرجى المحاولة مرة أخرى."
+            else:
+                fallback_message = "I apologize, but I'm experiencing technical difficulties. Please try again."
+        
         return ChatResponse(
             session_id=fallback_session,
-            text="I apologize, but I'm experiencing technical difficulties. Please try again in a moment.",
-            language=msg.locale or "en",
+            text=fallback_message,
+            language=fallback_language,
             sources=[],
-            confidence=0.0,
+            confidence=0.15,
             suggested_questions=[]
         )
 
@@ -176,3 +189,34 @@ async def get_conversation_history(session_id: str, db: Session = Depends(get_db
     except Exception as e:
         logger.error(f"❌ Failed to get history: {str(e)}")
         return {"session_id": session_id, "history": [], "total": 0}
+
+# ADDED: Debug endpoint to test RAG service directly
+@router.post("/debug")
+async def debug_message(msg: WebMsg, db: Session = Depends(get_db)):
+    """Debug endpoint to test RAG service directly"""
+    try:
+        logger.info(f"🔍 Debug: Testing RAG with message: {msg.text}")
+        
+        # Call RAG service directly
+        response = await enterprise_rag_service.generate_response(
+            user_message=msg.text,
+            language=msg.locale or "auto",
+            conversation_history=[],
+            db=db
+        )
+        
+        return {
+            "debug": True,
+            "rag_response": response,
+            "message": "RAG service working correctly",
+            "confidence": response.get("confidence", 0)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Debug endpoint failed: {str(e)}", exc_info=True)
+        return {
+            "debug": True,
+            "error": str(e),
+            "message": "RAG service failed",
+            "confidence": 0
+        }
