@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8"/>
+<title>Store Assistant</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:32px auto}#log{border:1px solid #ddd;padding:12px;height:360px;overflow:auto}#i{width:80%}</style>
+<h2>Store Assistant</h2>
+<div id="log"></div>
+<input id="i" placeholder="Type a message..."/><button id="send">Send</button>
+<script>
+const log=document.getElementById('log'), i=document.getElementById('i'), s=document.getElementById('send');
+function add(role, text){const p=document.createElement('p');p.textContent=(role==='user'?'You: ':'Bot: ')+text;log.appendChild(p);log.scrollTop=log.scrollHeight;}
+s.onclick = async () => {
+  const text=i.value.trim(); if(!text) return; add('user',text); i.value='';
+  const r=await fetch('/channels/webchat/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,session_id:localStorage.sid||null})});
+  const j=await r.json(); if(j.session_id) localStorage.sid=j.session_id; add('bot', j.text || '[no reply]');
+};
+</script>
