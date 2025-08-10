@@ -9,9 +9,12 @@ from app.routers import channels
 from app.models import user, conversation, document
 from app.database import create_tables
 
+# Import vector service
+from app.services import vector_service
+
 app = FastAPI(title="Store Assistant", version="0.1.0")
 
-# Create database tables on startup
+# Create database tables and initialize services on startup
 @app.on_event("startup")
 async def startup_event():
     print("🗄️ Creating database tables...")
@@ -19,6 +22,15 @@ async def startup_event():
     print("✅ Database setup complete!")
     print(f"🔗 Database: {settings.DATABASE_URL}")
     print(f"⚡ Redis: {settings.REDIS_URL}")
+    
+    # Initialize vector service
+    print("🧠 Initializing Pinecone vector service...")
+    try:
+        await vector_service.initialize()
+        print("✅ Vector service initialized successfully!")
+    except Exception as e:
+        print(f"❌ Vector service initialization failed: {str(e)}")
+        print("⚠️ App will continue but RAG features may not work")
 
 app.add_middleware(
     CORSMiddleware,
