@@ -30,7 +30,7 @@ class ChatResponse(BaseModel):
 @router.post("/message", response_model=ChatResponse)
 async def message(msg: WebMsg, db: Session = Depends(get_db)):
     """
-    Process chat message using RAG (Retrieval-Augmented Generation)
+    Process chat message using Enterprise RAG (Retrieval-Augmented Generation)
     
     - **text**: User's message
     - **session_id**: Optional session identifier for conversation continuity
@@ -74,12 +74,12 @@ async def message(msg: WebMsg, db: Session = Depends(get_db)):
         
         logger.info(f"💬 Processing message for session {session_id}: {msg.text[:50]}...")
         
-        # Generate RAG response
+        # Generate Enterprise RAG response
         rag_response = await enterprise_rag_service.generate_response(
             user_message=msg.text,
             language=msg.locale or user.preferred_language or "auto",
             conversation_history=formatted_history,
-            use_knowledge_base=True
+            db=db  # Pass database session to RAG service
         )
         
         # Extract response components
@@ -109,7 +109,7 @@ async def message(msg: WebMsg, db: Session = Depends(get_db)):
         # Get suggested questions
         suggested_questions = await enterprise_rag_service.get_suggested_questions(detected_language)
         
-        logger.info(f"✅ Response generated for session {session_id}")
+        logger.info(f"✅ Response generated for session {session_id} - Confidence: {confidence:.2f}")
         
         return ChatResponse(
             session_id=session_id,
@@ -121,7 +121,7 @@ async def message(msg: WebMsg, db: Session = Depends(get_db)):
         )
         
     except Exception as e:
-        logger.error(f"❌ Chat processing failed: {str(e)}")
+        logger.error(f"❌ Chat processing failed: {str(e)}", exc_info=True)
         
         # Return error response
         fallback_session = msg.session_id or str(uuid.uuid4())
