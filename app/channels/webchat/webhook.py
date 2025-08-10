@@ -9,7 +9,7 @@ import logging
 from app.database import get_db
 from app.models.user import User
 from app.models.conversation import Conversation
-from app.services.rag_service import rag_service
+from app.services.rag_service import enterprise_rag_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -75,7 +75,7 @@ async def message(msg: WebMsg, db: Session = Depends(get_db)):
         logger.info(f"💬 Processing message for session {session_id}: {msg.text[:50]}...")
         
         # Generate RAG response
-        rag_response = await rag_service.generate_response(
+        rag_response = await enterprise_rag_service.generate_response(
             user_message=msg.text,
             language=msg.locale or user.preferred_language or "auto",
             conversation_history=formatted_history,
@@ -107,7 +107,7 @@ async def message(msg: WebMsg, db: Session = Depends(get_db)):
         db.commit()
         
         # Get suggested questions
-        suggested_questions = await rag_service.get_suggested_questions(detected_language)
+        suggested_questions = await enterprise_rag_service.get_suggested_questions(detected_language)
         
         logger.info(f"✅ Response generated for session {session_id}")
         
@@ -138,7 +138,7 @@ async def message(msg: WebMsg, db: Session = Depends(get_db)):
 async def get_suggestions(language: str = "en"):
     """Get suggested questions for the chat interface"""
     try:
-        suggestions = await rag_service.get_suggested_questions(language)
+        suggestions = await enterprise_rag_service.get_suggested_questions(language)
         return {
             "suggestions": suggestions,
             "language": language
