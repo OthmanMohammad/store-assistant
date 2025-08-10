@@ -207,7 +207,6 @@ async def main():
         print("\n📋 Next Steps:")
         print("   1. Test with real PDF: Create any PDF and use the API")
         print("   2. Or install reportlab: pip install reportlab")
-        print("   3. Ready for RAG implementation!")
     else:
         print("❌ Some core functions failed.")
 
