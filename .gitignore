@@ -2,3 +2,8 @@
 __pycache__/
 *.pyc
 .env
+logs/
+*.log
+.DS_Store
+postgres_data/
+redis_data/
