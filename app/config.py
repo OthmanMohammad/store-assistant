@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     
     # API
-    ALLOW_ORIGINS: str = "http://localhost:8000,http://127.0.0.1:8000"
+    ALLOW_ORIGINS: str = "http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173"
     
     # WhatsApp
     WHATSAPP_VERIFY_TOKEN: str = ""
