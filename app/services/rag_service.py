@@ -1,12 +1,11 @@
-# app/services/rag_service.py
 """
 Complete Enterprise RAG Service using Prompt Service
-Includes all missing helper methods
+Includes STREAMING SUPPORT
 """
 
 import logging
 import json
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional, Tuple, Union, AsyncGenerator
 import openai
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class EnterpriseRAGService:
     """
-    Complete Enterprise RAG service with prompt service integration
+    Complete Enterprise RAG service with prompt service integration + STREAMING
     """
     
     def __init__(self):
@@ -87,6 +86,152 @@ class EnterpriseRAGService:
             if should_close_db and db_session:
                 db_session.close()
     
+    # 🔥 NEW: STREAMING METHODS
+    async def _generate_streaming_response(
+        self,
+        user_message: str,
+        query_analysis: Dict[str, Any],
+        structured_data: Dict[str, Any],
+        unstructured_data: Dict[str, Any],
+        conversation_history: List[Dict[str, str]],
+        language: str
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Generate streaming response using OpenAI streaming API"""
+        try:
+            detected_language = query_analysis.get('language', language)
+            
+            # Use prompt service for system prompt
+            system_prompt = self.prompt_service.get_system_prompt(detected_language)
+            
+            # Build data and conversation context
+            data_context = self._build_data_context(structured_data, unstructured_data)
+            history_context = self._build_conversation_context(conversation_history)
+            
+            # Use prompt service for user prompt
+            user_prompt = self.prompt_service.get_user_prompt(
+                user_message=user_message,
+                language=detected_language,
+                data_context=data_context,
+                history_context=history_context,
+                query_analysis=query_analysis
+            )
+            
+            # START STREAMING - Modified OpenAI call
+            stream = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=800,
+                temperature=0.7,
+                stream=True  # 🔥 ENABLE STREAMING
+            )
+            
+            # Initialize response tracking
+            full_response = ""
+            token_count = 0
+            
+            # Stream each token as it arrives
+            for chunk in stream:
+                if chunk.choices[0].delta.content is not None:
+                    token = chunk.choices[0].delta.content
+                    full_response += token
+                    token_count += 1
+                    
+                    # Yield each token with metadata
+                    yield {
+                        "type": "token",
+                        "content": token,
+                        "full_text": full_response,
+                        "token_count": token_count,
+                        "language": detected_language
+                    }
+            
+            # Calculate final confidence after streaming
+            confidence = self._calculate_hybrid_confidence(
+                structured_data, unstructured_data, query_analysis, full_response
+            )
+            
+            # Compile sources
+            all_sources = unstructured_data.get("sources", [])
+            if structured_data.get("products"):
+                all_sources.append("قاعدة بيانات المنتجات" if detected_language == "ar" else "Product Database")
+            if structured_data.get("services"):
+                all_sources.append("قاعدة بيانات الخدمات" if detected_language == "ar" else "Service Database")
+            if structured_data.get("store_info"):
+                all_sources.append("معلومات المتجر" if detected_language == "ar" else "Store Information")
+            
+            # Send final completion data
+            yield {
+                "type": "complete",
+                "content": full_response,
+                "language": detected_language,
+                "sources": list(set(all_sources)),
+                "confidence": confidence,
+                "metadata": {
+                    "products_found": len(structured_data.get("products", [])),
+                    "services_found": len(structured_data.get("services", [])),
+                    "context_chunks": len(unstructured_data.get("chunks", [])),
+                    "intent": query_analysis.get("intent"),
+                    "total_tokens": token_count
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Streaming response generation failed: {str(e)}")
+            yield {
+                "type": "error", 
+                "content": self.prompt_service.get_fallback_response(detected_language),
+                "error": str(e)
+            }
+
+    async def generate_streaming_response(
+        self,
+        user_message: str,
+        language: str = "auto",
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        db: Optional[Session] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Main streaming entry point - yields tokens as they're generated
+        """
+        db_session = db or next(get_db())
+        should_close_db = db is None
+        
+        try:
+            logger.info(f"🔥 Starting streaming RAG for: {user_message[:50]}...")
+            
+            # Step 1: Analyze query (non-streaming)
+            query_analysis = await self._analyze_query(user_message, language)
+            
+            # Step 2: Retrieve data (non-streaming)  
+            structured_data = await self._retrieve_structured_data(query_analysis, db_session)
+            unstructured_data = await self._retrieve_unstructured_data(user_message, query_analysis)
+            
+            # Step 3: Stream the response generation
+            async for chunk in self._generate_streaming_response(
+                user_message=user_message,
+                query_analysis=query_analysis,
+                structured_data=structured_data,
+                unstructured_data=unstructured_data,
+                conversation_history=conversation_history or [],
+                language=language
+            ):
+                yield chunk
+                
+        except Exception as e:
+            logger.error(f"❌ Streaming RAG failed: {str(e)}")
+            yield {
+                "type": "error",
+                "content": "I apologize, but I'm experiencing technical difficulties.",
+                "error": str(e)
+            }
+        finally:
+            if should_close_db and db_session:
+                db_session.close()
+    
+    # EXISTING METHODS (unchanged)
     async def _analyze_query(self, query: str, language: str) -> Dict[str, Any]:
         """Advanced query analysis to extract intent and entities using GPT-4"""
         try:
