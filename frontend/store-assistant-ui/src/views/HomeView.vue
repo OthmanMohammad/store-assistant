@@ -72,40 +72,39 @@
               <div class="message-bubble">
                 <div class="message-text" v-html="formatMessage(message.text)"></div>
                 
-                <!-- Assistant Message Metadata -->
+                <!-- 🔥 NEW: Streaming cursor -->
+                <span v-if="message.isStreaming" class="streaming-cursor">|</span>
+                
+                <!-- 🔥 MODIFIED: Assistant Message Metadata -->
                 <div v-if="message.role === 'assistant' && !message.isWelcome" class="message-meta">
                   <div class="meta-items">
-                    <span v-if="message.confidence" class="confidence" :class="getConfidenceClass(message.confidence)">
-                      {{ Math.round(message.confidence * 100) }}% confidence
+                    <!-- 🔥 NEW: Show streaming status -->
+                    <span v-if="message.isStreaming" class="streaming-status">
+                      <div class="typing-dots">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </div>
+                      Writing... ({{ message.tokenCount || 0 }} tokens)
                     </span>
-                    <span v-if="message.sources && message.sources.length" class="sources">
-                      {{ message.sources.length }} source{{ message.sources.length > 1 ? 's' : '' }}
-                    </span>
-                    <span class="timestamp">{{ formatTime(message.timestamp) }}</span>
+                    
+                    <!-- Regular metadata (shown when not streaming) -->
+                    <template v-else>
+                      <span v-if="message.confidence" class="confidence" :class="getConfidenceClass(message.confidence)">
+                        {{ Math.round(message.confidence * 100) }}% confidence
+                      </span>
+                      <span v-if="message.sources && message.sources.length" class="sources">
+                        {{ message.sources.length }} source{{ message.sources.length > 1 ? 's' : '' }}
+                      </span>
+                      <span class="timestamp">{{ formatTime(message.timestamp) }}</span>
+                    </template>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Typing Indicator -->
-          <div v-if="isTyping" class="message-wrapper assistant">
-            <div class="message-content">
-              <div class="avatar assistant">
-                <div class="assistant-avatar">🏪</div>
-              </div>
-              <div class="message-bubble typing">
-                <div class="typing-indicator">
-                  <div class="typing-dots">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                  </div>
-                  <span class="typing-text">Thinking...</span>
-                </div>
-              </div>
-            </div>
-          </div>
+          <!-- 🔥 REMOVED: Old typing indicator (replaced by streaming) -->
         </div>
 
         <!-- Error Message -->
@@ -139,21 +138,31 @@
             @input="handleInput"
             :placeholder="getPlaceholder()"
             :dir="currentLanguage === 'ar' ? 'rtl' : 'ltr'"
-            :disabled="isLoading"
+            :disabled="isLoading || isStreaming"
             class="message-input"
             rows="1"
           ></textarea>
           
+          <!-- 🔥 MODIFIED: Send button with streaming state -->
           <button 
             @click="sendMessage()"
             :disabled="!canSend"
             class="send-button"
-            :class="{ 'can-send': canSend }"
+            :class="{ 'can-send': canSend, 'streaming': isStreaming }"
           >
-            <svg v-if="!isLoading" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <!-- 🔥 NEW: Different icons for different states -->
+            <svg v-if="!isLoading && !isStreaming" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="22" y1="2" x2="11" y2="13"/>
               <polygon points="22,2 15,22 11,13 2,9 22,2"/>
             </svg>
+            
+            <!-- Show pause icon while streaming -->
+            <svg v-else-if="isStreaming" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="6" y="4" width="4" height="16"/>
+              <rect x="14" y="4" width="4" height="16"/>
+            </svg>
+            
+            <!-- Loading spinner for other loading states -->
             <div v-else class="loading-spinner"></div>
           </button>
         </div>
@@ -179,10 +188,9 @@
 import { ref, computed, nextTick, onMounted } from 'vue'
 import apiService from '@/services/apiService'
 
-// State
+// EXISTING STATE
 const inputText = ref('')
 const isLoading = ref(false)
-const isTyping = ref(false)
 const error = ref(null)
 const sessionId = ref(localStorage.getItem('sessionId') || null)
 const currentLanguage = ref('en')
@@ -190,6 +198,10 @@ const detectedLanguage = ref(null)
 const suggestions = ref([])
 const chatContainer = ref(null)
 const messageInput = ref(null)
+
+// 🔥 NEW: Streaming state
+const isStreaming = ref(false)
+const streamingMessageId = ref(null)
 
 const messages = ref([
   {
@@ -201,19 +213,19 @@ const messages = ref([
   }
 ])
 
-// Computed
+// 🔥 MODIFIED: canSend computed to prevent sending while streaming
 const canSend = computed(() => {
-  return inputText.value.trim().length > 0 && !isLoading.value
+  return inputText.value.trim().length > 0 && !isLoading.value && !isStreaming.value
 })
 
 const displayMessages = computed(() => {
   return messages.value.filter(msg => !msg.isWelcome)
 })
 
-// Methods
+// 🔥 MODIFIED: sendMessage function with streaming
 const sendMessage = async (messageText = null) => {
   const text = messageText || inputText.value.trim()
-  if (!text || isLoading.value) return
+  if (!text || isLoading.value || isStreaming.value) return
 
   const detected = apiService.detectLanguage(text)
   detectedLanguage.value = detected
@@ -235,60 +247,114 @@ const sendMessage = async (messageText = null) => {
     resizeTextarea()
   }
   
+  // 🔥 NEW: Create streaming assistant message
+  const assistantMessage = {
+    id: Date.now() + 1,
+    role: 'assistant',
+    text: '',
+    timestamp: new Date(),
+    language: detected,
+    confidence: 0,
+    sources: [],
+    isStreaming: true,
+    tokenCount: 0
+  }
+  
+  messages.value.push(assistantMessage)
+  streamingMessageId.value = assistantMessage.id
+  
   isLoading.value = true
-  isTyping.value = true
+  isStreaming.value = true
   error.value = null
   
   await scrollToBottom()
 
   try {
-    const response = await apiService.sendMessage(text, sessionId.value, detected)
-    
-    if (response.session_id) {
-      sessionId.value = response.session_id
-      localStorage.setItem('sessionId', response.session_id)
-    }
-
-    if (response.language) {
-      currentLanguage.value = response.language
-    }
-    
-    const botMessage = {
-      id: Date.now() + 1,
-      role: 'assistant',
-      text: response.text || response.answer || 'Sorry, I couldn\'t understand that.',
-      timestamp: new Date(),
-      language: response.language || detected,
-      confidence: response.confidence || 0,
-      sources: response.sources || []
-    }
-    
-    messages.value.push(botMessage)
-
-    if (response.suggested_questions?.length > 0) {
-      suggestions.value = response.suggested_questions
-    }
+    // 🔥 NEW: Use streaming API
+    await apiService.sendStreamingMessage(
+      text, 
+      sessionId.value, 
+      detected,
+      // onToken callback - called for each token
+      (tokenData) => {
+        // Find the streaming message and update it
+        const msgIndex = messages.value.findIndex(m => m.id === streamingMessageId.value)
+        if (msgIndex !== -1) {
+          messages.value[msgIndex].text = tokenData.fullText
+          messages.value[msgIndex].tokenCount = tokenData.tokenCount
+          messages.value[msgIndex].language = tokenData.language
+          
+          // Auto-scroll as text appears
+          nextTick(() => scrollToBottom())
+        }
+      },
+      // onComplete callback - called when response is done
+      (completeData) => {
+        // Update final message data
+        const msgIndex = messages.value.findIndex(m => m.id === streamingMessageId.value)
+        if (msgIndex !== -1) {
+          messages.value[msgIndex].isStreaming = false
+          messages.value[msgIndex].confidence = completeData.confidence || 0
+          messages.value[msgIndex].sources = completeData.sources || []
+          messages.value[msgIndex].metadata = completeData.metadata
+        }
+        
+        // Update session and language
+        if (completeData.sessionId) {
+          sessionId.value = completeData.sessionId
+          localStorage.setItem('sessionId', completeData.sessionId)
+        }
+        
+        if (completeData.language) {
+          currentLanguage.value = completeData.language
+        }
+        
+        // Clean up streaming state
+        isLoading.value = false
+        isStreaming.value = false
+        streamingMessageId.value = null
+        
+        scrollToBottom()
+      },
+      // onError callback
+      (err) => {
+        console.error('Streaming error:', err)
+        
+        // Update message with error
+        const msgIndex = messages.value.findIndex(m => m.id === streamingMessageId.value)
+        if (msgIndex !== -1) {
+          messages.value[msgIndex].isStreaming = false
+          messages.value[msgIndex].text = messages.value[msgIndex].text || 
+            'Sorry, I\'m experiencing technical difficulties. Please try again.'
+          messages.value[msgIndex].isError = true
+        }
+        
+        error.value = 'Failed to send message. Please try again.'
+        
+        // Clean up
+        isLoading.value = false
+        isStreaming.value = false
+        streamingMessageId.value = null
+      }
+    )
     
   } catch (err) {
     console.error('Send message error:', err)
     error.value = 'Failed to send message. Please try again.'
     
-    const errorMessage = {
-      id: Date.now() + 1,
-      role: 'assistant',
-      text: 'Sorry, I\'m experiencing technical difficulties. Please try again.',
-      timestamp: new Date(),
-      isError: true
+    // Remove the failed streaming message
+    const msgIndex = messages.value.findIndex(m => m.id === streamingMessageId.value)
+    if (msgIndex !== -1) {
+      messages.value.splice(msgIndex, 1)
     }
     
-    messages.value.push(errorMessage)
-  } finally {
     isLoading.value = false
-    isTyping.value = false
-    await scrollToBottom()
+    isStreaming.value = false
+    streamingMessageId.value = null
   }
 }
 
+// EXISTING METHODS (unchanged)
 const clearChat = () => {
   messages.value = [messages.value[0]] // Keep welcome message
   sessionId.value = null
@@ -379,7 +445,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* ChatGPT-Style Professional UI */
+/* ChatGPT-Style Professional UI + STREAMING STYLES */
 .chat-app {
   display: flex;
   flex-direction: column;
@@ -605,6 +671,13 @@ onMounted(async () => {
   color: #2d2d2d;
   font-size: 16px;
   word-wrap: break-word;
+  transition: all 0.1s ease-out;
+  animation: fadeInText 0.2s ease-out;
+}
+
+@keyframes fadeInText {
+  from { opacity: 0.7; }
+  to { opacity: 1; }
 }
 
 .message-text .price {
@@ -617,6 +690,28 @@ onMounted(async () => {
   font-weight: 500;
 }
 
+/* 🔥 NEW: Streaming cursor animation */
+.streaming-cursor {
+  display: inline-block;
+  color: #10a37f;
+  font-weight: bold;
+  font-size: 16px;
+  margin-left: 2px;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* 🔥 NEW: Streaming message bubble effect */
+.message-bubble:has(.streaming-cursor) {
+  border-left: 3px solid #10a37f;
+  background: linear-gradient(90deg, rgba(16, 163, 127, 0.02), transparent);
+  transition: all 0.3s ease;
+}
+
 .message-meta {
   margin-top: 8px;
 }
@@ -626,43 +721,59 @@ onMounted(async () => {
   gap: 12px;
   font-size: 12px;
   color: #8e8e8e;
+  transition: all 0.3s ease;
+}
+
+/* 🔥 NEW: Streaming status indicator */
+.streaming-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #10a37f;
+  font-size: 12px;
+  font-style: italic;
+  background: rgba(16, 163, 127, 0.1);
+  padding: 4px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 163, 127, 0.2);
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-weight: 500;
+}
+
+/* 🔥 NEW: Mini typing dots for streaming status */
+.streaming-status .typing-dots {
+  display: flex;
+  gap: 2px;
+}
+
+.streaming-status .typing-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #10a37f;
+  animation: typing-mini 1.4s ease-in-out infinite;
+}
+
+.streaming-status .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+.streaming-status .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes typing-mini {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
 }
 
 .confidence.high { color: #10a37f; }
 .confidence.medium { color: #ff8c00; }
 .confidence.low { color: #ef4444; }
 
-/* Typing Indicator */
-.typing-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* 🔥 NEW: Enhanced message highlighting during streaming */
+.message-wrapper.assistant:has(.streaming-cursor) .avatar.assistant .assistant-avatar {
+  animation: glow 2s ease-in-out infinite;
 }
 
-.typing-dots {
-  display: flex;
-  gap: 4px;
-}
-
-.typing-dots span {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #10a37f;
-  animation: typing 1.4s ease-in-out infinite;
-}
-
-.typing-dots span:nth-child(1) { animation-delay: -0.32s; }
-.typing-dots span:nth-child(2) { animation-delay: -0.16s; }
-
-@keyframes typing {
-  0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
-  40% { transform: scale(1); opacity: 1; }
-}
-
-.typing-text {
-  color: #8e8e8e;
-  font-size: 14px;
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(16, 163, 127, 0.3); }
+  50% { box-shadow: 0 0 15px rgba(16, 163, 127, 0.6), 0 0 25px rgba(16, 163, 127, 0.3); }
 }
 
 /* Error Banner */
@@ -767,9 +878,32 @@ onMounted(async () => {
   background: #0e9168;
 }
 
+/* 🔥 NEW: Streaming send button states */
+.send-button.streaming {
+  background: #ff6b6b;
+  color: white;
+  animation: pulse-red 2s ease-in-out infinite;
+}
+
+.send-button.streaming:hover {
+  background: #ff5252;
+}
+
+.send-button.streaming:disabled {
+  opacity: 1;
+  cursor: pointer;
+  transform: scale(1);
+}
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
 .send-button:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   cursor: not-allowed;
+  transform: scale(0.95);
 }
 
 .loading-spinner {
@@ -835,6 +969,21 @@ onMounted(async () => {
     flex-direction: column;
     gap: 4px;
   }
+
+  /* 🔥 NEW: Mobile responsiveness for streaming */
+  .streaming-cursor {
+    font-size: 14px;
+  }
+  
+  .streaming-status {
+    font-size: 11px;
+    padding: 3px 6px;
+  }
+  
+  .streaming-status .typing-dots span {
+    width: 3px;
+    height: 3px;
+  }
 }
 
 /* RTL Support */
@@ -844,5 +993,35 @@ onMounted(async () => {
 
 [dir="rtl"] .input-wrapper {
   flex-direction: row-reverse;
+}
+
+/* 🔥 NEW: Dark mode support for streaming (if you add dark mode later) */
+@media (prefers-color-scheme: dark) {
+  .streaming-cursor {
+    color: #19c37d;
+  }
+  
+  .streaming-status {
+    color: #19c37d;
+    background: rgba(25, 195, 125, 0.1);
+    border-color: rgba(25, 195, 125, 0.2);
+  }
+  
+  .streaming-status .typing-dots span {
+    background: #19c37d;
+  }
+}
+
+/* 🔥 NEW: Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .streaming-cursor,
+  .typing-dots span,
+  .send-button.streaming {
+    animation: none;
+  }
+  
+  .streaming-cursor {
+    opacity: 1;
+  }
 }
 </style>
