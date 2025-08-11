@@ -1,101 +1,177 @@
 <template>
-  <div class="home-view">
+  <div class="chat-app">
     <!-- Header -->
-    <div class="chat-header">
-      <h1>🏪 Store Assistant</h1>
-      <p>AI-powered customer service • Ask anything about our store!</p>
-      <div class="language-indicator">{{ currentLanguage.toUpperCase() }}</div>
-    </div>
+    <header class="chat-header">
+      <div class="header-content">
+        <div class="logo-section">
+          <div class="logo">🏪</div>
+          <h1>TechMart Assistant</h1>
+        </div>
+        <div class="header-actions">
+          <div class="language-badge" :class="currentLanguage">
+            {{ currentLanguage.toUpperCase() }}
+          </div>
+          <button @click="clearChat" class="clear-btn" title="New Chat">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
 
-    <!-- Chat Container -->
-    <div class="chat-container">
-      <!-- Messages Area -->
-      <div class="messages-area" ref="messagesContainer">
-        <div v-for="message in messages" :key="message.id" class="message" :class="message.role">
-          <div class="bubble" :class="`${message.role}-bubble`">
-            {{ message.text }}
+    <!-- Main Chat Area -->
+    <main class="chat-main">
+      <div class="chat-container" ref="chatContainer">
+        <!-- Welcome Message for New Chats -->
+        <div v-if="messages.length <= 1" class="welcome-screen">
+          <div class="welcome-content">
+            <h2>How can I help you today?</h2>
+            <p>Ask me anything about TechMart Palestine - products, services, store hours, and more!</p>
             
-            <!-- Bot message metadata -->
-            <div v-if="message.role === 'assistant' && !message.isWelcome" class="message-meta">
-              <div class="meta-row">
-                <span v-if="message.confidence !== undefined" class="confidence" :class="getConfidenceClass(message.confidence)">
-                  Confidence: {{ Math.round(message.confidence * 100) }}%
-                </span>
-                <span v-if="message.sources && message.sources.length > 0" class="sources">
-                  Sources: {{ message.sources.slice(0, 2).join(', ') }}
-                </span>
-              </div>
-              <div class="timestamp">
-                {{ formatTime(message.timestamp) }}
+            <!-- Quick Actions -->
+            <div class="quick-actions" v-if="suggestions.length > 0">
+              <h3>Try asking about:</h3>
+              <div class="action-grid">
+                <button 
+                  v-for="suggestion in suggestions.slice(0, 4)" 
+                  :key="suggestion"
+                  @click="sendMessage(suggestion)"
+                  class="action-card"
+                >
+                  <span>{{ suggestion }}</span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="9,18 15,12 9,6"/>
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
         </div>
-        
-        <!-- Typing indicator -->
-        <div v-if="isTyping" class="message assistant">
-          <div class="bubble assistant-bubble typing">
-            <span class="typing-text">Thinking...</span>
+
+        <!-- Messages -->
+        <div v-if="messages.length > 1" class="messages-container">
+          <div 
+            v-for="message in displayMessages" 
+            :key="message.id" 
+            class="message-wrapper"
+            :class="message.role"
+          >
+            <div class="message-content">
+              <!-- Avatar -->
+              <div class="avatar" :class="message.role">
+                <div v-if="message.role === 'user'" class="user-avatar">
+                  {{ currentLanguage === 'ar' ? 'ع' : 'U' }}
+                </div>
+                <div v-else class="assistant-avatar">
+                  🏪
+                </div>
+              </div>
+
+              <!-- Message Bubble -->
+              <div class="message-bubble">
+                <div class="message-text" v-html="formatMessage(message.text)"></div>
+                
+                <!-- Assistant Message Metadata -->
+                <div v-if="message.role === 'assistant' && !message.isWelcome" class="message-meta">
+                  <div class="meta-items">
+                    <span v-if="message.confidence" class="confidence" :class="getConfidenceClass(message.confidence)">
+                      {{ Math.round(message.confidence * 100) }}% confidence
+                    </span>
+                    <span v-if="message.sources && message.sources.length" class="sources">
+                      {{ message.sources.length }} source{{ message.sources.length > 1 ? 's' : '' }}
+                    </span>
+                    <span class="timestamp">{{ formatTime(message.timestamp) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Typing Indicator -->
+          <div v-if="isTyping" class="message-wrapper assistant">
+            <div class="message-content">
+              <div class="avatar assistant">
+                <div class="assistant-avatar">🏪</div>
+              </div>
+              <div class="message-bubble typing">
+                <div class="typing-indicator">
+                  <div class="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                  <span class="typing-text">Thinking...</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Error message -->
-        <div v-if="error" class="error-message">
-          {{ error }}
-          <button @click="clearError">✕</button>
+        <!-- Error Message -->
+        <div v-if="error" class="error-banner">
+          <div class="error-content">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="15" y1="9" x2="9" y2="15"/>
+              <line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+            <span>{{ error }}</span>
+            <button @click="clearError" class="error-close">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
+    </main>
 
-      <!-- Suggestions (show only when no messages) -->
-      <div v-if="suggestions.length > 0 && messages.length <= 1" class="suggestions-panel">
-        <h4>💡 Suggested Questions:</h4>
-        <div class="suggestion-buttons">
-          <button 
-            v-for="suggestion in suggestions" 
-            :key="suggestion"
-            @click="sendMessage(suggestion)"
-            class="suggestion-btn"
-          >
-            {{ suggestion }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Input Area -->
-      <div class="input-area">
-        <div class="input-row">
-          <input 
+    <!-- Input Area -->
+    <footer class="chat-footer">
+      <div class="input-container">
+        <div class="input-wrapper">
+          <textarea
+            ref="messageInput"
             v-model="inputText"
-            @keypress.enter="sendMessage()"
-            :placeholder="currentLanguage === 'ar' ? 'اكتب سؤالك هنا...' : 'Type your question...'"
-            :disabled="isLoading"
+            @keydown="handleKeyDown"
+            @input="handleInput"
+            :placeholder="getPlaceholder()"
             :dir="currentLanguage === 'ar' ? 'rtl' : 'ltr'"
-            class="text-input"
-          />
+            :disabled="isLoading"
+            class="message-input"
+            rows="1"
+          ></textarea>
+          
           <button 
-            @click="sendMessage()" 
+            @click="sendMessage()"
             :disabled="!canSend"
-            class="send-btn"
-            :class="{ 'enabled': canSend, 'disabled': !canSend }"
+            class="send-button"
+            :class="{ 'can-send': canSend }"
           >
-            {{ isLoading ? 'Sending...' : (currentLanguage === 'ar' ? 'إرسال' : 'Send') }}
+            <svg v-if="!isLoading" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22,2 15,22 11,13 2,9 22,2"/>
+            </svg>
+            <div v-else class="loading-spinner"></div>
           </button>
         </div>
         
-        <!-- Language detection hint -->
+        <!-- Language Detection Hint -->
         <div v-if="detectedLanguage && detectedLanguage !== currentLanguage" class="language-hint">
-          🌍 Detected {{ detectedLanguage === 'ar' ? 'Arabic' : 'English' }} - 
-          <button @click="currentLanguage = detectedLanguage" class="lang-switch-btn">
+          <span>{{ detectedLanguage === 'ar' ? 'العربية' : 'English' }} detected</span>
+          <button @click="currentLanguage = detectedLanguage" class="switch-language">
             Switch to {{ detectedLanguage === 'ar' ? 'Arabic' : 'English' }}
           </button>
         </div>
+        
+        <!-- Footer Info -->
+        <div class="footer-info">
+          <span>TechMart Assistant can make mistakes. Check important info.</span>
+        </div>
       </div>
-    </div>
-
-    <!-- Debug info -->
-    <div class="debug-info">
-      Session: {{ sessionId || 'New' }} | Language: {{ currentLanguage }} | Backend: {{ backendStatus }}
-    </div>
+    </footer>
   </div>
 </template>
 
@@ -112,23 +188,26 @@ const sessionId = ref(localStorage.getItem('sessionId') || null)
 const currentLanguage = ref('en')
 const detectedLanguage = ref(null)
 const suggestions = ref([])
-const backendStatus = ref('Unknown')
+const chatContainer = ref(null)
+const messageInput = ref(null)
 
 const messages = ref([
   {
     id: 'welcome',
     role: 'assistant',
-    text: 'Hello! أهلاً وسهلاً! How can I help you today? كيف يمكنني مساعدتك؟',
+    text: 'Hello! I\'m your TechMart Palestine assistant. How can I help you today?',
     timestamp: new Date(),
     isWelcome: true
   }
 ])
 
-const messagesContainer = ref(null)
-
 // Computed
 const canSend = computed(() => {
   return inputText.value.trim().length > 0 && !isLoading.value
+})
+
+const displayMessages = computed(() => {
+  return messages.value.filter(msg => !msg.isWelcome)
 })
 
 // Methods
@@ -136,7 +215,6 @@ const sendMessage = async (messageText = null) => {
   const text = messageText || inputText.value.trim()
   if (!text || isLoading.value) return
 
-  // Detect language
   const detected = apiService.detectLanguage(text)
   detectedLanguage.value = detected
   if (!messageText) currentLanguage.value = detected
@@ -149,16 +227,14 @@ const sendMessage = async (messageText = null) => {
     language: detected
   }
 
-  // Add user message
   messages.value.push(userMessage)
   
-  // Clear input if not from suggestion
   if (!messageText) {
     inputText.value = ''
     detectedLanguage.value = null
+    resizeTextarea()
   }
   
-  // Show loading/typing
   isLoading.value = true
   isTyping.value = true
   error.value = null
@@ -166,25 +242,21 @@ const sendMessage = async (messageText = null) => {
   await scrollToBottom()
 
   try {
-    // Call real API
     const response = await apiService.sendMessage(text, sessionId.value, detected)
     
-    // Update session ID
     if (response.session_id) {
       sessionId.value = response.session_id
       localStorage.setItem('sessionId', response.session_id)
     }
 
-    // Update language if detected by backend
     if (response.language) {
       currentLanguage.value = response.language
     }
     
-    // Add bot response
     const botMessage = {
       id: Date.now() + 1,
       role: 'assistant',
-      text: response.text || 'Sorry, I couldn\'t understand that.',
+      text: response.text || response.answer || 'Sorry, I couldn\'t understand that.',
       timestamp: new Date(),
       language: response.language || detected,
       confidence: response.confidence || 0,
@@ -193,23 +265,18 @@ const sendMessage = async (messageText = null) => {
     
     messages.value.push(botMessage)
 
-    // Update suggestions if provided
-    if (response.suggested_questions && response.suggested_questions.length > 0) {
+    if (response.suggested_questions?.length > 0) {
       suggestions.value = response.suggested_questions
     }
     
-    backendStatus.value = 'Connected ✅'     
-    
   } catch (err) {
     console.error('Send message error:', err)
-    error.value = 'Failed to connect to backend. Make sure FastAPI is running on port 8000.'
-    backendStatus.value = 'Error ❌'
+    error.value = 'Failed to send message. Please try again.'
     
-    // Add error message
     const errorMessage = {
       id: Date.now() + 1,
       role: 'assistant',
-      text: 'Sorry, I\'m having technical difficulties. Please make sure the backend server is running.',
+      text: 'Sorry, I\'m experiencing technical difficulties. Please try again.',
       timestamp: new Date(),
       isError: true
     }
@@ -222,24 +289,59 @@ const sendMessage = async (messageText = null) => {
   }
 }
 
-const loadSuggestions = async () => {
-  try {
-    const response = await apiService.getSuggestions(currentLanguage.value)
-    suggestions.value = response.suggestions || []
-  } catch (err) {
-    console.error('Load suggestions error:', err)
-  }
+const clearChat = () => {
+  messages.value = [messages.value[0]] // Keep welcome message
+  sessionId.value = null
+  localStorage.removeItem('sessionId')
+  error.value = null
 }
 
 const clearError = () => {
   error.value = null
 }
 
+const handleKeyDown = (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    sendMessage()
+  }
+}
+
+const handleInput = () => {
+  resizeTextarea()
+  
+  if (inputText.value.length > 2) {
+    detectedLanguage.value = apiService.detectLanguage(inputText.value)
+  } else {
+    detectedLanguage.value = null
+  }
+}
+
+const resizeTextarea = () => {
+  const textarea = messageInput.value
+  if (textarea) {
+    textarea.style.height = 'auto'
+    textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px'
+  }
+}
+
 const scrollToBottom = async () => {
   await nextTick()
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  if (chatContainer.value) {
+    chatContainer.value.scrollTop = chatContainer.value.scrollHeight
   }
+}
+
+const formatMessage = (text) => {
+  if (!text) return ''
+  
+  let formatted = text
+  formatted = formatted.replace(/\n/g, '<br>')
+  formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+  formatted = formatted.replace(/(\d+\.?\d*\s?(JOD|دينار))/gi, '<span class="price">$1</span>')
+  formatted = formatted.replace(/(\+?\d{1,4}[-.\s]?\(?\d{1,3}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9})/g, '<span class="phone">$1</span>')
+  
+  return formatted
 }
 
 const formatTime = (timestamp) => {
@@ -255,286 +357,492 @@ const getConfidenceClass = (confidence) => {
   return 'low'
 }
 
-// Auto-detect language as user types
-const handleInput = () => {
-  if (inputText.value.length > 2) {
-    detectedLanguage.value = apiService.detectLanguage(inputText.value)
-  } else {
-    detectedLanguage.value = null
+const getPlaceholder = () => {
+  return currentLanguage.value === 'ar' 
+    ? 'اكتب رسالتك هنا...' 
+    : 'Message TechMart Assistant...'
+}
+
+const loadSuggestions = async () => {
+  try {
+    const response = await apiService.getSuggestions(currentLanguage.value)
+    suggestions.value = response.suggestions || []
+  } catch (err) {
+    console.error('Load suggestions error:', err)
   }
 }
 
 // Initialize
 onMounted(async () => {
   await loadSuggestions()
-  
-  // Test backend connection
-  try {
-    await fetch('http://localhost:8000/health/readyz')
-    backendStatus.value = 'Connected ✅'
-  } catch (err) {
-    backendStatus.value = 'Disconnected ❌'
-    error.value = 'Backend not accessible. Make sure FastAPI is running on port 8000.'
-  }
 })
 </script>
 
 <style scoped>
-/* Previous styles plus new ones */
-.home-view {
-  max-width: 800px;
-  margin: 20px auto;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-  overflow: hidden;
-}
-
-.chat-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  padding: 20px;
-  text-align: center;
-  position: relative;
-}
-
-.language-indicator {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  background: rgba(255,255,255,0.2);
-  padding: 4px 8px;
-  border-radius: 10px;
-  font-size: 12px;
-}
-
-.chat-header h1 {
-  margin: 0 0 5px 0;
-  font-size: 24px;
-}
-
-.chat-header p {
-  margin: 0;
-  opacity: 0.9;
-  font-size: 14px;
-}
-
-.chat-container {
+/* ChatGPT-Style Professional UI */
+.chat-app {
   display: flex;
   flex-direction: column;
-  height: 500px;
+  height: 100vh;
+  background: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
 }
 
-.messages-area {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
-  background: #fafafa;
+/* Header */
+.chat-header {
+  background: #ffffff;
+  border-bottom: 1px solid #e5e5e5;
+  padding: 12px 0;
+  flex-shrink: 0;
 }
 
-.message {
-  margin-bottom: 15px;
-  display: flex;
-}
-
-.message.user {
-  justify-content: flex-end;
-}
-
-.message.assistant {
-  justify-content: flex-start;
-}
-
-.bubble {
-  max-width: 70%;
-  padding: 12px 16px;
-  border-radius: 18px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  word-wrap: break-word;
-}
-
-.user-bubble {
-  background: #667eea;
-  color: white;
-  margin-left: 50px;
-}
-
-.assistant-bubble {
-  background: white;
-  border: 1px solid #e0e0e0;
-  margin-right: 50px;
-  color: #374151;
-}
-
-.assistant-bubble.typing {
-  opacity: 0.7;
-}
-
-.message-meta {
-  font-size: 11px;
-  color: #666;
-  margin-top: 8px;
-}
-
-.meta-row {
+.header-content {
+  max-width: 768px;
+  margin: 0 auto;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 3px;
+  padding: 0 16px;
 }
 
-.confidence.high { color: #10b981; }
-.confidence.medium { color: #f59e0b; }
-.confidence.low { color: #ef4444; }
-
-.sources {
-  font-size: 10px;
-  color: #888;
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.timestamp {
-  font-size: 10px;
-  color: #9ca3af;
+.logo {
+  font-size: 24px;
 }
 
-.typing-text {
-  font-style: italic;
-  opacity: 0.7;
+.logo-section h1 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #2d2d2d;
+  margin: 0;
 }
 
-.error-message {
-  text-align: center;
-  color: #dc2626;
-  background: #fef2f2;
-  padding: 12px;
-  border-radius: 8px;
-  margin: 16px;
-  border: 1px solid #fecaca;
-  position: relative;
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.error-message button {
-  position: absolute;
-  top: 8px;
-  right: 8px;
+.language-badge {
+  background: #f7f7f8;
+  color: #6b6b6b;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.language-badge.ar {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.clear-btn {
   background: none;
   border: none;
-  color: #dc2626;
+  padding: 8px;
+  border-radius: 6px;
   cursor: pointer;
-  font-weight: bold;
-}
-
-.suggestions-panel {
-  padding: 15px 20px;
-  background: #f8faff;
-  border-top: 1px solid #e5e7eb;
-}
-
-.suggestions-panel h4 {
-  margin: 0 0 10px 0;
-  font-size: 14px;
-  color: #374151;
-}
-
-.suggestion-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.suggestion-btn {
-  padding: 6px 12px;
-  background: white;
-  border: 1px solid #d1d5db;
-  border-radius: 15px;
-  cursor: pointer;
-  font-size: 12px;
-  color: #374151;
+  color: #6b6b6b;
   transition: all 0.2s;
 }
 
-.suggestion-btn:hover {
-  background: #3b82f6;
-  color: white;
-  border-color: #3b82f6;
+.clear-btn:hover {
+  background: #f7f7f8;
+  color: #2d2d2d;
 }
 
-.input-area {
-  padding: 20px;
-  background: white;
-  border-top: 1px solid #e5e7eb;
-}
-
-.input-row {
+/* Main Chat Area */
+.chat-main {
+  flex: 1;
+  overflow: hidden;
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+}
+
+.chat-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 0;
+}
+
+/* Welcome Screen */
+.welcome-screen {
+  max-width: 768px;
+  margin: 0 auto;
+  padding: 48px 16px;
+  text-align: center;
+}
+
+.welcome-content h2 {
+  font-size: 32px;
+  font-weight: 600;
+  color: #2d2d2d;
+  margin: 0 0 12px 0;
+}
+
+.welcome-content p {
+  font-size: 16px;
+  color: #6b6b6b;
+  margin: 0 0 32px 0;
+  line-height: 1.5;
+}
+
+.quick-actions h3 {
+  font-size: 16px;
+  font-weight: 500;
+  color: #2d2d2d;
+  margin: 0 0 16px 0;
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.action-card {
+  background: #ffffff;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  padding: 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  justify-content: space-between;
   align-items: center;
 }
 
-.text-input {
-  flex: 1;
-  padding: 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 25px;
-  outline: none;
+.action-card:hover {
+  background: #f7f7f8;
+  border-color: #d0d0d0;
+}
+
+.action-card span {
+  color: #2d2d2d;
   font-size: 14px;
 }
 
-.text-input:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+.action-card svg {
+  color: #6b6b6b;
+  opacity: 0.5;
 }
 
-.text-input:disabled {
+/* Messages */
+.messages-container {
+  max-width: 768px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.message-wrapper {
+  margin-bottom: 24px;
+}
+
+.message-wrapper.user .message-content {
+  margin-left: 48px;
+}
+
+.message-wrapper.assistant .message-content {
+  margin-right: 48px;
+}
+
+.message-content {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.avatar.user .user-avatar {
+  background: #19c37d;
+  color: white;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.avatar.assistant .assistant-avatar {
+  background: #10a37f;
+  color: white;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 16px;
+}
+
+.message-bubble {
+  flex: 1;
+  line-height: 1.6;
+}
+
+.message-text {
+  color: #2d2d2d;
+  font-size: 16px;
+  word-wrap: break-word;
+}
+
+.message-text .price {
+  color: #10a37f;
+  font-weight: 600;
+}
+
+.message-text .phone {
+  color: #1976d2;
+  font-weight: 500;
+}
+
+.message-meta {
+  margin-top: 8px;
+}
+
+.meta-items {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #8e8e8e;
+}
+
+.confidence.high { color: #10a37f; }
+.confidence.medium { color: #ff8c00; }
+.confidence.low { color: #ef4444; }
+
+/* Typing Indicator */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.typing-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.typing-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10a37f;
+  animation: typing 1.4s ease-in-out infinite;
+}
+
+.typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+.typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes typing {
+  0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+.typing-text {
+  color: #8e8e8e;
+  font-size: 14px;
+}
+
+/* Error Banner */
+.error-banner {
+  max-width: 768px;
+  margin: 0 auto 16px auto;
+  padding: 0 16px;
+}
+
+.error-content {
+  background: #fee;
+  border: 1px solid #fcc;
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #c00;
+}
+
+.error-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #c00;
+  margin-left: auto;
+}
+
+/* Footer Input */
+.chat-footer {
+  background: #ffffff;
+  border-top: 1px solid #e5e5e5;
+  padding: 16px 0 24px 0;
+  flex-shrink: 0;
+}
+
+.input-container {
+  max-width: 768px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.input-wrapper {
+  background: #ffffff;
+  border: 1px solid #d0d0d0;
+  border-radius: 24px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  transition: border-color 0.2s;
+}
+
+.input-wrapper:focus-within {
+  border-color: #10a37f;
+  box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.1);
+}
+
+.message-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  resize: none;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #2d2d2d;
+  background: transparent;
+  font-family: inherit;
+  max-height: 200px;
+}
+
+.message-input::placeholder {
+  color: #8e8e8e;
+}
+
+.message-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.send-button {
+  background: #f7f7f8;
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #8e8e8e;
+  flex-shrink: 0;
+}
+
+.send-button.can-send {
+  background: #10a37f;
+  color: white;
+}
+
+.send-button.can-send:hover {
+  background: #0e9168;
+}
+
+.send-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.send-btn {
-  padding: 12px 24px;
-  border: none;
-  border-radius: 25px;
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 14px;
-  transition: all 0.2s;
+.loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ffffff;
+  border-top: 2px solid transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
 }
 
-.send-btn.enabled {
-  background: #3b82f6;
-  color: white;
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
-.send-btn.enabled:hover {
-  background: #2563eb;
-}
-
-.send-btn.disabled {
-  background: #d1d5db;
-  color: #9ca3af;
-  cursor: not-allowed;
-}
-
+/* Language Hint */
 .language-hint {
   margin-top: 8px;
   font-size: 12px;
-  color: #6b7280;
+  color: #8e8e8e;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.lang-switch-btn {
-  color: #3b82f6;
+.switch-language {
   background: none;
   border: none;
+  color: #10a37f;
   cursor: pointer;
   text-decoration: underline;
+  font-size: 12px;
 }
 
-.debug-info {
-  padding: 8px 16px;
-  background: #f9fafb;
-  border-top: 1px solid #e5e7eb;
-  font-size: 11px;
-  color: #6b7280;
+/* Footer Info */
+.footer-info {
+  margin-top: 8px;
   text-align: center;
+  font-size: 12px;
+  color: #8e8e8e;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .welcome-content h2 {
+    font-size: 24px;
+  }
+  
+  .action-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .message-wrapper.user .message-content {
+    margin-left: 0;
+  }
+  
+  .message-wrapper.assistant .message-content {
+    margin-right: 0;
+  }
+  
+  .meta-items {
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+
+/* RTL Support */
+[dir="rtl"] .message-content {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .input-wrapper {
+  flex-direction: row-reverse;
 }
 </style>
