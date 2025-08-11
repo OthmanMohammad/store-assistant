@@ -1,14 +1,15 @@
 """
-Webchat Webhook - Using the Updated RAG Service
+Webchat Webhook - Using the Updated RAG Service + STREAMING SUPPORT
 """
-
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict
 import uuid
 import json
 import logging
+import asyncio
 
 from app.database import get_db
 from app.models.user import User
@@ -146,6 +147,121 @@ async def message(msg: WebMsg, db: Session = Depends(get_db)):
             confidence=0.15,
             suggested_questions=[]
         )
+
+# 🔥 NEW: STREAMING ENDPOINT
+@router.post("/message/stream")
+async def message_stream(msg: WebMsg, db: Session = Depends(get_db)):
+    """
+    🔥 NEW: Streaming message endpoint using Server-Sent Events
+    Returns tokens as they're generated for real-time typing effect
+    """
+    
+    async def generate_sse_stream():
+        """Generator function for Server-Sent Events"""
+        try:
+            # Get or create session
+            session_id = msg.session_id or str(uuid.uuid4())
+            
+            # Get or create user
+            user = db.query(User).filter(User.session_id == session_id).first()
+            if not user:
+                user = User(
+                    session_id=session_id,
+                    preferred_language=msg.locale or "en"
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+            
+            # Get conversation history
+            conversation_history = db.query(Conversation)\
+                .filter(Conversation.session_id == session_id)\
+                .order_by(Conversation.created_at.desc())\
+                .limit(5)\
+                .all()
+            
+            formatted_history = []
+            for conv in reversed(conversation_history):
+                if conv.user_message:
+                    formatted_history.append({"role": "user", "content": conv.user_message})
+                if conv.bot_response:
+                    formatted_history.append({"role": "assistant", "content": conv.bot_response})
+            
+            # Send initial session info
+            yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
+            
+            # Track the complete response for database storage
+            complete_response = ""
+            final_metadata = {}
+            detected_language = msg.locale or user.preferred_language or "en"
+            confidence = 0.0
+            
+            # Stream tokens from RAG service
+            async for chunk in enterprise_rag_service.generate_streaming_response(
+                user_message=msg.text,
+                language=msg.locale or user.preferred_language or "auto",
+                conversation_history=formatted_history,
+                db=db
+            ):
+                # Send each chunk as SSE
+                yield f"data: {json.dumps(chunk)}\n\n"
+                
+                # Track complete response
+                if chunk.get("type") == "complete":
+                    complete_response = chunk.get("content", "")
+                    final_metadata = chunk.get("metadata", {})
+                    detected_language = chunk.get("language", detected_language)
+                    confidence = chunk.get("confidence", 0.0)
+                
+                # Small delay to prevent overwhelming the client
+                await asyncio.sleep(0.01)
+            
+            # Save conversation to database after streaming completes
+            if complete_response:
+                # Update user's preferred language
+                if detected_language != user.preferred_language:
+                    user.preferred_language = detected_language
+                    db.commit()
+                
+                # Save conversation
+                conversation = Conversation(
+                    user_id=user.id,
+                    session_id=session_id,
+                    user_message=msg.text,
+                    bot_response=complete_response,
+                    language=detected_language,
+                    confidence=confidence,
+                    response_time_ms=final_metadata.get("total_tokens", 0) * 50  # Estimated
+                )
+                db.add(conversation)
+                db.commit()
+            
+            # Send final done signal
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"❌ Streaming failed: {str(e)}")
+            
+            # Send error to client
+            error_response = {
+                "type": "error",
+                "content": "عذراً، أواجه مشكلة تقنية. يرجى المحاولة مرة أخرى." if msg.locale == "ar" 
+                         else "Sorry, I'm experiencing technical difficulties. Please try again.",
+                "error": str(e)
+            }
+            yield f"data: {json.dumps(error_response)}\n\n"
+    
+    # Return Server-Sent Events response
+    return StreamingResponse(
+        generate_sse_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": "true"
+        }
+    )
 
 @router.get("/suggestions")
 async def get_suggestions(language: str = "en"):
