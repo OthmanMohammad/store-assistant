@@ -4,11 +4,7 @@ A sophisticated enterprise-grade RAG (Retrieval-Augmented Generation) customer s
 
 ## Demo
 
-<video controls preload="metadata" width="720" style="max-width:100%; height:auto;"
-       src="[https://raw.githubusercontent.com/USER/REPO/BRANCH/assets/Demo.mp4](https://github.com/OthmanMohammad/store-assistant/blob/main/assets/Demo.mp4)">
-  Your browser doesn't support embedded videos.
-</video>
-
+<a href="assets/Demo.mp4" target="_blank">▶️ Watch the demo</a>
 
 
 ## Architecture Overview
@@ -349,4 +345,5 @@ python scripts/testing/test_webhook_fix.py
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
 
